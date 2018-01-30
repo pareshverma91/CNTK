@@ -155,6 +155,7 @@ bool CheckFunction(std::string& p_nodeType, bool* allowUndeterminedVariable)
          if (EqualInsensitive(nodeType, OperationNameOf(AbsNode))) ret = true;
     else if (EqualInsensitive(nodeType, OperationNameOf(AcosNode))) ret = true;
     else if (EqualInsensitive(nodeType, OperationNameOf(AsinNode))) ret = true;
+    else if (EqualInsensitive(nodeType, OperationNameOf(AsinhNode))) ret = true;
     else if (EqualInsensitive(nodeType, OperationNameOf(AtanhNode))) ret = true;
     else if (EqualInsensitive(nodeType, OperationNameOf(AveragePoolingNode))) ret = true;
     else if (EqualInsensitive(nodeType, OperationNameOf(BatchNormalizationNode))) ret = true;
@@ -164,6 +165,7 @@ bool CheckFunction(std::string& p_nodeType, bool* allowUndeterminedVariable)
     else if (EqualInsensitive(nodeType, OperationNameOf(ClassBasedCrossEntropyWithSoftmaxNode), L"CBCEWithSM")) ret = true;
     else if (EqualInsensitive(nodeType, OperationNameOf(ClassificationErrorNode), L"ErrorPrediction")) ret = true;
     else if (EqualInsensitive(nodeType, OperationNameOf(EditDistanceErrorNode))) ret = true;
+    else if (EqualInsensitive(nodeType, OperationNameOf(StopGradientNode))) ret = true;
     else if (EqualInsensitive(nodeType, OperationNameOf(EqualNode))) ret = true;
     else if (EqualInsensitive(nodeType, OperationNameOf(GreaterEqualNode))) ret = true;
     else if (EqualInsensitive(nodeType, OperationNameOf(GreaterNode))) ret = true;
@@ -227,6 +229,7 @@ bool CheckFunction(std::string& p_nodeType, bool* allowUndeterminedVariable)
     else if (EqualInsensitive(nodeType, OperationNameOf(SequenceDecoderNode), L"SEWithSM")) ret = true;
 #endif
     else if (EqualInsensitive(nodeType, OperationNameOf(SequenceWithSoftmaxNode), L"SEWithSM")) ret = true;
+    else if (EqualInsensitive(nodeType, OperationNameOf(LatticeSequenceWithSoftmaxNode))) ret = true;
     else if (EqualInsensitive(nodeType, OperationNameOf(SigmoidNode))) ret = true;
     else if (EqualInsensitive(nodeType, OperationNameOf(SinhNode))) ret = true;
     else if (EqualInsensitive(nodeType, OperationNameOf(SinNode))) ret = true;

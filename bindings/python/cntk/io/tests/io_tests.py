@@ -8,6 +8,7 @@
 import numpy as np
 import cntk as C
 import pytest
+import sys
 
 from cntk.io import MinibatchSource, CTFDeserializer, CBFDeserializer, \
     StreamDefs, StreamDef, \
@@ -896,8 +897,8 @@ def test_usermbsource_training(tmpdir, with_checkpoint_impl):
     mbs_cv = MBS_CV_CLASS(input_dim, num_output_classes)
 
     from cntk import sequence, parameter, plus, cross_entropy_with_softmax, \
-            classification_error, learning_rate_schedule, sgd, Trainer, \
-            training_session, times, UnitType
+            classification_error, learning_parameter_schedule_per_sample, sgd, Trainer, \
+            training_session, times
 
     feature = sequence.input_variable(shape=(input_dim,))
     label = C.input_variable(shape=(num_output_classes,))
@@ -906,8 +907,9 @@ def test_usermbsource_training(tmpdir, with_checkpoint_impl):
     ce = cross_entropy_with_softmax(z, label)
     errs = classification_error(z, label)
 
-    lr_per_sample = learning_rate_schedule(
-        [0.3, 0.2, 0.1, 0.0], UnitType.sample)
+    #having a large learning rate to prevent the model from converging earlier where not all the intended samples are fed
+    #note that training session can end earlier if there is no updates
+    lr_per_sample = learning_parameter_schedule_per_sample(0.3)
     learner = sgd(z.parameters, lr_per_sample)
     trainer = Trainer(z, (ce, errs), [learner])
     input_map = {
@@ -1360,9 +1362,13 @@ def test_user_deserializer_sequence_mode():
     d = GenDeserializer(stream_infos=streams, num_chunks=15, 
                         num_sequences=100, max_sequence_len=10)
     mbs = MinibatchSource([d], randomize=False, max_sweeps=2)
+    state = mbs.get_checkpoint_state()
+    mbs.restore_from_checkpoint(state)
     run_minibatch_source(mbs, num_chunks=15, num_sequences_per_value=200)
     # Randomized
     mbs = MinibatchSource([d], randomize=True, max_sweeps=2, randomization_window_in_chunks=5)
+    state = mbs.get_checkpoint_state()
+    mbs.restore_from_checkpoint(state)
     run_minibatch_source(mbs, num_chunks=15, num_sequences_per_value=200)
 
     # Small chunks of 1
@@ -1419,3 +1425,37 @@ def test_index_caching(tmpdir):
 
     assert timeWithCache < timeWithoutCache
 
+def test_composite_source_synced_transforms(tmpdir):
+    from PIL import Image
+
+    np.random.seed(1)
+    tmpmap = str(tmpdir/'sync_test.map')
+    with open(tmpmap, 'w') as f:
+        for i in range(10):
+            data = np.random.randint(0, 2**8, (224,224,3))
+            image = Image.fromarray(data.astype('uint8'), "RGB")
+            tmpjpg = str(tmpdir/('%d.jpg'%i))
+            image.save(tmpjpg)
+            f.write("%s\t0\n"%tmpjpg)
+
+    def create_reader(map_file1, map_file2):
+        transforms = [xforms.crop(crop_type='randomside', side_ratio=0.8, jitter_type='uniratio'), xforms.scale(width=224, height=224, channels=3, interpolations='linear')]
+        source1 = C.io.ImageDeserializer(map_file1, C.io.StreamDefs(
+            source_image = C.io.StreamDef(field='image', transforms=transforms)))
+        source2 = C.io.ImageDeserializer(map_file2, C.io.StreamDefs(
+            target_image = C.io.StreamDef(field='image', transforms=transforms)))
+        return C.io.MinibatchSource([source1, source2], max_samples=sys.maxsize, randomize=True, multithreaded_deserializer=False)
+
+    x = C.input_variable((3,224,224))
+    y = C.input_variable((3,224,224))
+    loss = C.squared_error(x, y)
+    reader = create_reader(tmpmap, tmpmap)
+    minibatch_size = 2
+    input_map={
+        x: reader.streams.source_image,
+        y: reader.streams.target_image
+    }
+    
+    for i in range(30):
+        data=reader.next_minibatch(minibatch_size, input_map=input_map)
+        assert np.allclose(loss.eval(data), np.zeros(minibatch_size))

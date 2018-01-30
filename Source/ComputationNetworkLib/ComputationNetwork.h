@@ -1294,7 +1294,7 @@ private:
     public:
         ExecutionGraph(const std::vector<ComputationNodeBasePtr>& roots) : m_roots(roots) {}
 
-        const std::vector<ComputationNodeBasePtr>& Predecessors(const ComputationNodeBasePtr& node) const override
+        std::vector<ComputationNodeBasePtr> Predecessors(const ComputationNodeBasePtr& node) const override
         {
             return node->GetInputs();
         }
@@ -1311,10 +1311,12 @@ typedef ComputationNetwork::ComputationNetworkPtr ComputationNetworkPtr;
 template <typename ElemType> static inline const wchar_t* ElemTypeName();
 template <> /*static*/ inline const wchar_t* ElemTypeName<float>()  { return L"float"; }
 template <> /*static*/ inline const wchar_t* ElemTypeName<double>() { return L"double"; }
+template <> /*static*/ inline const wchar_t* ElemTypeName<half>() { return L"half"; }
 
 // The following emits the class and enables the BaseMatrix<double> to be available (used by EvalDll)
 // The corresponding Matrix<float> is emitted in the SetDeviceId function above.
 template class Matrix<double>;
+template class Matrix<half>;
 
 // TODOs:
 //  - automatic inference of time window w.r.t. delay nodes (and related nodes such as a temporal pooling)

@@ -51,6 +51,10 @@ namespace CNTK
             combinedFunctionArgs = m_model->Outputs();
 
         combinedFunctionArgs.push_back(m_lossFunction);
+
+        if (m_lossFunction->Output().GetDataType() == DataType::Float16)
+            fprintf(stderr, "WARNING: using Float16 for loss function may cause overflow, please cast to float");
+
         if (!m_lossFunction->Output().DynamicAxes().empty())
         {
             m_aggregatedLossFunction = ReduceSum(lossFunction, Axis::AllAxes(), L"aggregateLoss");
@@ -137,18 +141,13 @@ namespace CNTK
 
         m_distributed = m_parameterLearners->IsDistributed();
 
+        if (m_distributed)
+            Evaluator::SetCommunicator(dynamic_cast<DistributedLearner*>(m_parameterLearners->ParameterLearners()[0].get())->GetCommunicator());
+
         for (auto& learner : m_parameterLearners->ParameterLearners())
         {
             learner->AddProgressWriters(progressWriters);
         }
-    }
-
-    static bool IsAtSweepEnd(const std::unordered_map<Variable, MinibatchData>& arguments)
-    {
-        return std::any_of(arguments.begin(), arguments.end(), [](const std::pair<const Variable, MinibatchData>& kv)
-        {
-            return kv.second.sweepEnd;
-        });
     }
 
     bool Trainer::TrainMinibatch(const std::unordered_map<Variable, MinibatchData>& arguments, const DeviceDescriptor& computeDevice /*= DeviceDescriptor::UseDefaultDevice()*/)
@@ -173,21 +172,21 @@ namespace CNTK
         return result;
     }
 
-    bool Trainer::TrainMinibatch(const std::unordered_map<Variable, ValuePtr>& arguments, const DeviceDescriptor& computeDevice /*= DeviceDescriptor::UseDefaultDevice()*/)
+    bool Trainer::TrainMinibatch(const std::unordered_map<Variable, ValuePtr>& arguments, bool isSweepEndInArguments, const DeviceDescriptor& computeDevice /*= DeviceDescriptor::UseDefaultDevice()*/)
     {
         std::unordered_map<Variable, ValuePtr> outputsToFetch = {};
-        return TrainMinibatch(arguments, outputsToFetch, computeDevice);
+        return TrainMinibatch(arguments, isSweepEndInArguments, outputsToFetch, computeDevice);
     }
 
-    bool Trainer::TrainMinibatch(const std::unordered_map<Variable, ValuePtr>& arguments, std::unordered_map<Variable, ValuePtr>& outputsToFetch, const DeviceDescriptor& computeDevice /*= DeviceDescriptor::UseDefaultDevice()*/)
+    bool Trainer::TrainMinibatch(const std::unordered_map<Variable, ValuePtr>& arguments, bool isSweepEndInArguments, std::unordered_map<Variable, ValuePtr>& outputsToFetch, const DeviceDescriptor& computeDevice /*= DeviceDescriptor::UseDefaultDevice()*/)
     {
 #ifndef  CNTK_UWP
         auto profMinibatch = Microsoft::MSR::CNTK::ScopeProfile(Microsoft::MSR::CNTK::profilerEvtMainMinibatch);
 #endif
 
         bool result = (!m_distributed) ?
-            TrainLocalMinibatch(arguments, outputsToFetch, false, computeDevice) :
-            TrainDistributedMinibatch(arguments, outputsToFetch, false, computeDevice);
+            TrainLocalMinibatch(arguments, outputsToFetch, isSweepEndInArguments, computeDevice) :
+            TrainDistributedMinibatch(arguments, outputsToFetch, isSweepEndInArguments, computeDevice);
 
         // TODO: exclude updating progress writers from profiling?
         UpdateTrainingProgress(m_prevMinibatchNumSamples, m_prevMinibatchAggregateTrainingLossValue,
@@ -231,6 +230,9 @@ namespace CNTK
             // Gradients are not existing.
             for (const auto& parameter : m_learnerParameters)
                 gradients[parameter] = nullptr;
+
+            trainingLoss = MakeSharedObject<NDArrayView>(0, (m_aggregatedLossFunction ? m_aggregatedLossFunction->Output().GetDataType() : DataType::Float), NDShape{}, computeDevice);
+            evalCriterion = MakeSharedObject<NDArrayView>(0, (m_aggregatedEvaluationFunction ? m_aggregatedEvaluationFunction->Output().GetDataType() : DataType::Float), NDShape{}, computeDevice);
         }
         else
         {
@@ -295,6 +297,24 @@ namespace CNTK
 
     void Trainer::SummarizeTrainingProgress()
     {
+        // Aggregate across workers training loss and eval criteria. Needed for BMUF like learner which don't aggregate after every minibatch.
+        if (m_parameterLearners->DoAggregateMetricsIfNeededLambda)
+        {
+            NDArrayViewPtr localLossValue = nullptr;
+            if (m_aggregatedTrainingLossValue && m_aggregatedTrainingLossValue->IsInitialized())
+            {
+                localLossValue = m_aggregatedTrainingLossValue->Data();
+            }
+
+            NDArrayViewPtr localEvalCriterion = nullptr;
+            if (m_aggregatedTrainingEvalCriterionValue && m_aggregatedTrainingEvalCriterionValue->IsInitialized())
+            {
+                localEvalCriterion = m_aggregatedTrainingEvalCriterionValue->Data();
+            }
+
+            m_parameterLearners->DoAggregateMetricsIfNeededLambda(localLossValue, localEvalCriterion);
+        }
+
         for (auto& progressWriter : m_progressWriters)
         {
             progressWriter->WriteTrainingSummary(m_aggregatedTrainingLossValue, m_aggregatedTrainingEvalCriterionValue);
@@ -359,8 +379,10 @@ namespace CNTK
 
         if (m_aggregatedLossFunction->Output().GetDataType() == DataType::Float)
             m_rootGradientValue->Data()->SetValue(1.0f);
-        else
+        else if (m_aggregatedLossFunction->Output().GetDataType() == DataType::Double)
             m_rootGradientValue->Data()->SetValue(1.0);
+        else
+            m_rootGradientValue->Data()->SetValue(half(1.0));
 
         for (const auto& parameter : m_learnerParameters)
             parameterGradients[parameter] = nullptr;
@@ -521,6 +543,24 @@ namespace CNTK
     size_t Trainer::TotalNumberOfSamplesSeen() const
     {
         return m_parameterLearners->ParameterLearners().front()->TotalNumberOfSamplesSeen();
+    }
+
+    size_t Trainer::TotalNumberOfUnitsSeen(DataUnit unit) const
+    {
+        switch (unit)
+        {
+        case DataUnit::Minibatch:
+            return m_parameterLearners->ParameterLearners().front()->TotalNumberOfMinibatchesSeen();
+            break;
+        case DataUnit::Sweep:
+            return m_parameterLearners->ParameterLearners().front()->TotalNumberOfSweepsSeen();
+            break;
+        case DataUnit::Sample:
+            return m_parameterLearners->ParameterLearners().front()->TotalNumberOfSamplesSeen();
+        default:
+            //should not be here; whenever a new data unit is defined, there should be a new case in this function.
+            LogicError("Unsupported data unit: %d", (int)unit);
+        }
     }
 
     TrainerPtr CreateTrainer(const FunctionPtr& model, const FunctionPtr& lossFunction, const std::vector<LearnerPtr>& parameterLearners,
