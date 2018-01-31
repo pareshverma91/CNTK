@@ -72,7 +72,7 @@ def simple_mnist(tensorboard_logdir=None):
     # Training config
     minibatch_size = 64
     num_samples_per_sweep = 60000
-    num_sweeps_to_train_with = 10
+    num_sweeps_to_train_with = 1
 
     # Instantiate progress writers.
     #training_progress_output_freq = 100
@@ -96,6 +96,8 @@ def simple_mnist(tensorboard_logdir=None):
         max_samples = num_samples_per_sweep * num_sweeps_to_train_with,
         progress_frequency=num_samples_per_sweep
     ).train()
+    
+    trainer.print_statistics()
     
     # Load test data
     path = os.path.normpath(os.path.join(data_dir, "Test-28x28_cntk_text.txt"))
