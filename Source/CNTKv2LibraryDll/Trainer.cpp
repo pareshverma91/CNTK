@@ -35,7 +35,7 @@ namespace CNTK
 
     Trainer::Trainer(const FunctionPtr& model, const FunctionPtr& lossFunction, const FunctionPtr& evaluationFunction,
                      const std::vector<LearnerPtr>& parameterLearners,
-                    const std::vector<ProgressWriterPtr>& progressWriters) 
+                    const std::vector<ProgressWriterPtr>& progressWriters)
         : Evaluator(evaluationFunction, progressWriters, false),
           m_model(model),
           m_lossFunction(lossFunction),
@@ -129,7 +129,7 @@ namespace CNTK
         }
 
         if (!learnerParametersNotPartOfModel.empty())
-            InvalidArgument("Trainer ctor: %d of the learner parameters '%S' are not part of the model specified", 
+            InvalidArgument("Trainer ctor: %d of the learner parameters '%S' are not part of the model specified",
                             (int)learnerParametersNotPartOfModel.size(), NamedListString(learnerParametersNotPartOfModel).c_str());
 
         if (!m_modelParametersNotCoveredByLearners.empty())
@@ -276,7 +276,7 @@ namespace CNTK
         }
 
         m_aggregatedTrainingLossValue->Update(loss, computeDevice);
-     
+
         if (m_aggregatedTrainingEvalCriterionValue)
         {
             m_aggregatedTrainingEvalCriterionValue->Update(evalCriterion, computeDevice);
@@ -323,7 +323,7 @@ namespace CNTK
 
     void Trainer::AddProgressWriters(const std::vector<ProgressWriterPtr>& progressWriters)
     {
-        for (auto& learner : m_parameterLearners->ParameterLearners()) 
+        for (auto& learner : m_parameterLearners->ParameterLearners())
         {
             learner->AddProgressWriters(progressWriters);
         }
@@ -448,7 +448,7 @@ namespace CNTK
 
         if (checkpoint.Contains(versionPropertyName))
             version = checkpoint[versionPropertyName].Value<size_t>();
-        
+
         auto learnerState = checkpoint[learnersPropertyName].Value<std::vector<DictionaryValue>>();
         auto externalState = checkpoint[externalStatePropertyName].Value<Dictionary>();
 
@@ -481,7 +481,7 @@ namespace CNTK
         {
             return externalState;
         }
-        
+
         // the checkpoint contains internal state for this worker.
         Dictionary localState = distributedState[localWorkerId].Value<Dictionary>();
 
@@ -489,11 +489,11 @@ namespace CNTK
         auto compositeFunction = std::dynamic_pointer_cast<CompositeFunction>(m_combinedTrainingFunction);
         if (compositeFunction == nullptr)
             RuntimeError("Combined training function is not a CompositeFunction.");
-            
-        // this assumes the compositeFunction (restored form a checkpoint made by the main node) and 
+
+        // this assumes the compositeFunction (restored form a checkpoint made by the main node) and
         // the internal worker state both have identical UIDs.
         compositeFunction->SetInternalState(internalState);
-        
+
         return localState[externalWorkerStateKey].Value<Dictionary>();
     }
 
@@ -541,7 +541,7 @@ namespace CNTK
             return m_parameterLearners->ParameterLearners().front()->TotalNumberOfSamplesSeen();
         default:
             //should not be here; whenever a new data unit is defined, there should be a new case in this function.
-            LogicError("Unsupported data unit: %d", unit);
+            LogicError("Unsupported data unit: %d", (int)unit);
         }
     }
 
